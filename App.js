@@ -6,6 +6,7 @@ import {
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import localLogo from './assets/images/logo.png';
 
 // --- إعدادات ---
 const BACKEND_URL = "https://ayba97-makwa-backend.hf.space";
@@ -41,7 +42,7 @@ export default function App() {
   // Cart
   const [cart, setCart] = useState([]);
   const [tempQty, setTempQty] = useState(1);
-  const [tempService, setTempService] = useState('both');
+  const [tempService, setTempService] = useState('wash');
   const [showCheckout, setShowCheckout] = useState(false);
   const [deliveryType, setDeliveryType] = useState('two_way');
 
@@ -106,18 +107,27 @@ export default function App() {
 
   // --- Logic ---
   const addToCart = () => {
-    if (!selectedProduct) return;
+    if (!selectedProduct || !tempService) return;
+
+    // حساب السعر الكلي لهذا العنصر
     const unitPrice = selectedProduct.prices[tempService];
-    const newItem = { 
-        id: Date.now(), 
-        categoryName: selectedProduct.name, 
-        parentCategory: selectedCategory.name, 
-        service: tempService, 
-        qty: tempQty, 
-        totalPrice: unitPrice * tempQty 
+    const totalItemPrice = unitPrice * tempQty; // السعر × العدد
+
+    const newItem = {
+      id: Date.now(),
+      productId: selectedProduct.id,
+      name: selectedProduct.name,
+      categoryName: selectedCategory.name,
+      service: tempService,
+      qty: tempQty,
+      price: unitPrice,       // سعر القطعة الواحدة
+      totalPrice: totalItemPrice // 👈 هذا المهم جداً للفاتورة
     };
-    setCart([...cart, newItem]); 
-    setSelectedProduct(null); 
+
+    setCart([...cart, newItem]);
+    setSelectedProduct(null);
+    setTempQty(1);
+    setTempService('wash');
   };
 
   const removeFromCart = (itemId) => {
@@ -126,29 +136,255 @@ export default function App() {
       if (newCart.length === 0) setShowCheckout(false); 
   };
 
+  // --- Auth & Helper Functions ---
   const sendOrderToServer = async () => {
-    if (cart.length === 0) return;
-    const deliveryCost = deliveryType === 'two_way' ? 2000 : 1000;
-    const total = cart.reduce((sum, item) => sum + item.totalPrice, 0) + deliveryCost;
-    let summary = "";
-    cart.forEach(item => { summary += `- ${item.categoryName} (${SERVICE_TYPES[item.service]}) x${item.qty}\n`; });
-    const deliveryText = deliveryType === 'two_way' ? 'ذهاب وإياب (2000)' : 'اتجاه واحد (1000)';
-    summary += `\n🚛 التوصيل: ${deliveryText}`;
+    if (cart.length === 0) { Alert.alert('تنبيه', 'السلة فارغة!'); return; }
+    if (!currentUser) { Alert.alert('تنبيه', 'يرجى تسجيل الدخول أولاً'); return; }
 
     try {
-        await fetch(`${BACKEND_URL}/create-order`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_phone: currentUser?.phone, total_amount: total, items_summary: summary })
+        // 👇 منطق التوصيل الجديد 👇
+        let deliveryPrice = 0;
+        let deliveryLabel = '  الزبون يتكفل بالتسليم والاستلام (بدون توصيل)';
+
+        if (deliveryType === 'two_way') {
+            deliveryPrice = 2000;
+            deliveryLabel = 'ذهاب وإياب';
+        } else if (deliveryType === 'one_way') {
+            deliveryPrice = 1000;
+            deliveryLabel = 'اتجاه واحد';
+        }
+        // 👆 ------------------ 👆
+
+        const itemsSummary = cart.map(item => 
+            `${item.name} (${SERVICE_TYPES[item.service]}) | ${item.qty} | ${item.totalPrice}`
+        ).join('\n');
+        
+        const deliverySummary = `التوصيل: ${deliveryLabel} | 1 | ${deliveryPrice}`;
+        const fullSummary = itemsSummary + '\n' + deliverySummary;
+
+        const orderData = {
+            user_phone: currentUser.phone,
+            total_amount: calculateTotal(),
+            items_summary: fullSummary
+        };
+
+        const response = await fetch(`${BACKEND_URL}/create-order`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(orderData)
         });
-        Alert.alert("نجاح", "تم إرسال طلبك بنجاح ✅");
-        setCart([]); setShowCheckout(false);
-        setActiveTab('orders'); 
-    } catch (error) { Alert.alert("خطأ", "فشل الإرسال"); }
+
+        // ... باقي كود النجاح (setDeliveryType('two_way') قد ترغب بتغييرها لـ wash او تركها) ...
+        const data = await response.json();
+        if (response.ok && data.status === 'success') {
+            Alert.alert('نجاح ✅', 'تم إرسال الطلب!');
+            setCart([]); 
+            setShowCheckout(false); 
+            setDeliveryType('two_way'); // إعادة التعيين للافتراضي
+            fetchMyOrders(); 
+        } else { throw new Error('فشل'); }
+
+    } catch (error) {
+        console.error(error);
+        Alert.alert('خطأ', 'فشل الإرسال');
+    }
+  };
+  const calculateTotal = () => {
+      let deliveryCost = 0;
+      if (deliveryType === 'two_way') deliveryCost = 2000;
+      else if (deliveryType === 'one_way') deliveryCost = 1000;
+      else deliveryCost = 0; // حالة 'no_delivery'
+
+      return cart.reduce((sum, item) => sum + item.totalPrice, 0) + deliveryCost;
   };
 
-  const calculateTotal = () => cart.reduce((sum, item) => sum + item.totalPrice, 0) + (deliveryType === 'two_way' ? 2000 : 1000);
+  const printInvoice = (order) => {
+    if (Platform.OS !== 'web') return;
 
-  // --- Auth & Helper Functions ---
+    const LOGO_PATH = localLogo; 
+
+    const rawItems = order.summary.split('\n').filter(line => line.trim() !== "");
+    const tableRows = rawItems.map(line => {
+        if (line.includes('|')) {
+            const parts = line.split('|');
+            return { name: parts[0].trim(), qty: parts[1].trim(), price: parts[2].trim() };
+        } else {
+            let name = line.replace('-', '').trim();
+            let qty = "1";
+            if(name.includes('x')) {
+                const p = name.split('x');
+                name = p[0].trim();
+                qty = p[p.length-1].trim();
+            }
+            return { name, qty, price: '-' };
+        }
+    });
+
+    const invoiceHTML = `
+      <html dir="rtl">
+        <head>
+          <title>فاتورة طلب #${order.id}</title>
+          <style>
+            /* ضبط الصفحة لتكون A5 وبدون هوامش خارجية للمتصفح */
+            @page { size: A5; margin: 0; }
+            
+            body { 
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+                padding: 10mm; /* هامش داخلي بسيط */
+                color: #333; 
+                background: white;
+                font-size: 11px; 
+                max-width: 148mm; 
+                margin: 0 auto;
+            }
+
+            .header-container { 
+                text-align: center; 
+                border-bottom: 2px solid #2A9D8F; 
+                padding-bottom: 5px; 
+                margin-bottom: 10px; 
+            }
+            .logo { width: 45px; height: 45px; object-fit: contain; }
+            h1 { color: #264653; font-size: 16px; margin: 2px 0; }
+            
+            .info-grid { 
+                display: flex; 
+                justify-content: space-between; 
+                background: #f8f9fa; 
+                padding: 6px; 
+                border-radius: 6px; 
+                font-size: 10px; 
+                margin-bottom: 10px; 
+                border: 1px solid #eee;
+            }
+            
+            table { width: 100%; border-collapse: collapse; border: 1px solid #ddd; font-size: 10px; margin-bottom: 10px; }
+            th { background-color: #264653; color: white; padding: 5px; text-align: center; }
+            td { border: 1px solid #ddd; padding: 5px; text-align: center; }
+            td.text-right { text-align: right; }
+            tr:nth-child(even) { background-color: #f9f9f9; }
+            
+            .total-box { 
+                text-align: left; 
+                font-size: 13px; 
+                font-weight: bold; 
+                color: #2A9D8F; 
+                padding: 5px 10px; 
+                border: 1px dashed #2A9D8F; 
+                display: inline-block; 
+            }
+            
+            /* التواقيع */
+            .signature-section { 
+                margin-top: 25px; 
+                display: flex; 
+                justify-content: space-between; 
+                padding: 0 15px;
+            }
+            .signature-box { text-align: center; width: 100px; }
+            .signature-line { border-bottom: 1px solid #333; margin-bottom: 5px; height: 20px; }
+            .signature-label { font-weight: bold; color: #264653; font-size: 10px; }
+
+            /* الفوتر (مثبت في أسفل الصفحة تماماً) */
+            .developer-footer {
+                position: fixed; /* تثبيت في أسفل الورقة */
+                bottom: 5mm;
+                left: 0;
+                right: 0;
+                text-align: center;
+                font-size: 9px;
+                color: #888;
+                background-color: white; /* لمنع تداخل النصوص */
+                padding-top: 5px;
+                border-top: 1px solid #eee;
+            }
+            .dev-name {
+                display: inline-flex;
+                align-items: center;
+                background-color: #f0f0f0;
+                padding: 2px 8px;
+                border-radius: 8px;
+                font-weight: bold;
+                color: #264653;
+                margin-top: 2px;
+                font-size: 9px;
+            }
+            
+            @media print {
+               body { height: auto; } /* إلغاء أي ارتفاع اجباري */
+               th { background-color: #ccc !important; color: black !important; }
+            }
+          </style>
+        </head>
+        <body>
+          
+          <div class="header-container">
+            <img src="${LOGO_PATH}" class="logo" />
+            <h1>مكوى المدينة ✨</h1>
+          </div>
+
+          <div class="info-grid">
+            <div><strong>#:</strong> ${order.id}</div>
+            <div><strong>العميل:</strong> ${order.user_name || 'زبون'}</div>
+            <div><strong>التاريخ:</strong> ${new Date().toLocaleDateString('ar-EG')}</div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 55%">الخدمة / المنتج</th>
+                <th style="width: 15%">العدد</th>
+                <th style="width: 30%">السعر</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${tableRows.map(row => `
+                <tr>
+                  <td class="text-right">${row.name}</td>
+                  <td>${row.qty}</td>
+                  <td>${row.price !== '-' ? row.price + ' د.ع' : '-'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+
+          <div style="text-align: left;">
+            <div class="total-box">
+               الإجمالي: ${order.amount} د.ع
+            </div>
+          </div>
+
+          <div class="signature-section">
+              <div class="signature-box">
+                  <div class="signature-line"></div>
+                  <div class="signature-label">توقيع المستلم</div>
+              </div>
+              <div class="signature-box">
+                  <div class="signature-line"></div>
+                  <div class="signature-label">توقيع الإدارة</div>
+              </div>
+          </div>
+
+          <div class="developer-footer">
+            <div style="margin-bottom:2px">شكراً لثقتكم بنا</div>
+            <div style="font-size: 7px;">Developed by</div>
+            <div class="dev-name">
+                <span style="color:#C13584; margin-left:2px; font-size:10px;">●</span> 
+                Aymen N. Hamad
+            </div>
+          </div>
+
+          <script>
+            window.onload = function() { window.print(); }
+          </script>
+        </body>
+      </html>
+    `;
+
+    const printWindow = window.open('', '', 'height=600,width=500');
+    printWindow.document.write(invoiceHTML);
+    printWindow.document.close();
+  };
   const checkLoginStatus = async () => {
     try {
       const savedUser = await AsyncStorage.getItem('user_session');
@@ -222,34 +458,55 @@ export default function App() {
                     contentContainerStyle={{padding: 15, paddingBottom: 50}} // إضافة مساحة في الأسفل
                     refreshControl={<RefreshControl refreshing={false} onRefresh={fetchOrders}/>}
                     renderItem={({item}) => (
-                        <View style={styles.orderCard}>
-                            <View style={styles.cardHeader}>
-                                <Text style={styles.userName}>{item.user_name}</Text>
-                                <TouchableOpacity onPress={() => deleteOrder(item.id)}>
-                                    <Ionicons name="trash-outline" size={20} color="red"/>
-                                </TouchableOpacity>
-                            </View>
-                            <Text style={styles.priceTag}>{item.amount} د.ع</Text>
-                            <Text style={{textAlign: 'right', color: '#666'}}>{item.user_phone}</Text>
-                            <View style={styles.summaryBox}>
-                                <Text style={{textAlign: 'right'}}>{item.summary}</Text>
-                            </View>
-                            <Text style={{textAlign: 'right', marginTop: 5}}>
-                                الحالة: <Text style={{color: getStatusColor(item.status)}}>{item.status}</Text>
-                            </Text>
-                            <View style={styles.actionRow}>
-                                <TouchableOpacity onPress={() => updateOrderStatus(item.id, 'جاري الغسل ⏳')} style={[styles.statusBtn, {backgroundColor: '#F4A261'}]}>
-                                    <Text style={{color: 'white'}}>بدء</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity onPress={() => updateOrderStatus(item.id, 'مكتمل ✅')} style={[styles.statusBtn, {backgroundColor: '#2A9D8F'}]}>
-                                    <Text style={{color: 'white'}}>إنجاز</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity onPress={() => Linking.openURL(`tel:${item.user_phone}`)} style={[styles.iconBtn, {backgroundColor: '#264653'}]}>
-                                    <Ionicons name="call" size={16} color="white"/>
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                    )}
+    <View style={styles.orderCard}>
+        <View style={styles.cardHeader}>
+            <Text style={styles.userName}>{item.user_name}</Text>
+            <View style={{flexDirection:'row-reverse', alignItems:'center'}}>
+                
+                {/* 👇👇👇 زر الطباعة (خاص بالمدير فقط وعلى الويب فقط) 👇👇👇 */}
+                {Platform.OS === 'web' && (
+                    <TouchableOpacity 
+                        onPress={() => printInvoice(item)} 
+                        style={{
+                            marginLeft: 10,
+                            padding: 5
+                        }}
+                    >
+                        <Ionicons name="print" size={24} color="#264653" />
+                    </TouchableOpacity>
+                )}
+                {/* 👆👆👆 ------------------------------------------ 👆👆👆 */}
+
+                <TouchableOpacity onPress={() => deleteOrder(item.id)}>
+                    <Ionicons name="trash-outline" size={20} color="red"/>
+                </TouchableOpacity>
+            </View>
+        </View>
+
+        <Text style={styles.priceTag}>{item.amount} د.ع</Text>
+        <Text style={{textAlign: 'right', color: '#666'}}>{item.user_phone}</Text>
+        
+        <View style={styles.summaryBox}>
+            <Text style={{textAlign: 'right'}}>{item.summary}</Text>
+        </View>
+        
+        <Text style={{textAlign: 'right', marginTop: 5}}>
+            الحالة: <Text style={{color: getStatusColor(item.status)}}>{item.status}</Text>
+        </Text>
+        
+        <View style={styles.actionRow}>
+            <TouchableOpacity onPress={() => updateOrderStatus(item.id, 'جاري الغسل ⏳')} style={[styles.statusBtn, {backgroundColor: '#F4A261'}]}>
+                <Text style={{color: 'white'}}>بدء</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => updateOrderStatus(item.id, 'مكتمل ✅')} style={[styles.statusBtn, {backgroundColor: '#2A9D8F'}]}>
+                <Text style={{color: 'white'}}>إنجاز</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => Linking.openURL(`tel:${item.user_phone}`)} style={[styles.iconBtn, {backgroundColor: '#264653'}]}>
+                <Ionicons name="call" size={16} color="white"/>
+            </TouchableOpacity>
+        </View>
+    </View>
+)}
                 />
             </SafeAreaView>
         </SafeAreaProvider>
@@ -424,11 +681,26 @@ export default function App() {
                                 ))}
                             </ScrollView>
 
-                            <Text style={{textAlign:'right', fontWeight:'bold', marginBottom:10}}>خيارات التوصيل:</Text>
-                            <View style={{flexDirection:'row-reverse', marginBottom:20}}>
-                                <TouchableOpacity onPress={() => setDeliveryType('two_way')} style={[styles.chip, deliveryType === 'two_way' && styles.chipActive]}><Text>ذهاب وإياب (2000)</Text></TouchableOpacity>
-                                <TouchableOpacity onPress={() => setDeliveryType('one_way')} style={[styles.chip, deliveryType === 'one_way' && styles.chipActive]}><Text>اتجاه واحد (1000)</Text></TouchableOpacity>
-                            </View>
+                            {/* داخل Modal Checkout */}
+<Text style={{textAlign:'right', fontWeight:'bold', marginBottom:10}}>خيارات التوصيل:</Text>
+
+{/* 👇 إضافة flexWrap:'wrap' لضمان عدم خروج الأزرار عن الشاشة 👇 */}
+<View style={{flexDirection:'row-reverse', flexWrap:'wrap', justifyContent:'center', marginBottom:20, gap: 5}}>
+    
+    <TouchableOpacity onPress={() => setDeliveryType('two_way')} style={[styles.chip, deliveryType === 'two_way' && styles.chipActive]}>
+        <Text style={{fontSize:11}}>ذهاب وإياب (2000)</Text>
+    </TouchableOpacity>
+    
+    <TouchableOpacity onPress={() => setDeliveryType('one_way')} style={[styles.chip, deliveryType === 'one_way' && styles.chipActive]}>
+        <Text style={{fontSize:11}}>اتجاه واحد (1000)</Text>
+    </TouchableOpacity>
+
+    {/* 👇 الزر الجديد 👇 */}
+    <TouchableOpacity onPress={() => setDeliveryType('no_delivery')} style={[styles.chip, deliveryType === 'no_delivery' && styles.chipActive]}>
+        <Text style={{fontSize:11}}>بدون توصيل (0)</Text>
+    </TouchableOpacity>
+
+</View>
 
                             <View style={{borderTopWidth:1, borderColor:'#eee', paddingTop:10, marginBottom:15}}>
                                 <Text style={{textAlign:'center', fontSize:18, fontWeight:'bold', color:'#2A9D8F'}}>المجموع: {calculateTotal()} د.ع</Text>
