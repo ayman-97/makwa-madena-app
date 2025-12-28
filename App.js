@@ -194,7 +194,13 @@ export default function App() {
   const getStatusColor = (s) => s.includes('مكتمل')?'#2A9D8F':s.includes('جاري')?'#F4A261':'#E76F51';
 
   // --- Screens ---
-  if (currentScreen === 'splash') return <View style={styles.center}><ActivityIndicator size="large" color="#2A9D8F"/></View>;
+  if (currentScreen === 'splash') {
+    return (
+        <SafeAreaProvider>
+            <View style={styles.center}><ActivityIndicator size="large" color="#2A9D8F"/></View>
+        </SafeAreaProvider>
+    );
+}
 
   if (currentScreen === 'admin') {
       return (
@@ -442,20 +448,22 @@ export default function App() {
   if (currentScreen === 'login' || currentScreen === 'register') {
       const isLogin = currentScreen === 'login';
       return (
-        <SafeAreaView style={styles.container}>
-          <View style={styles.authBox}>
-            <Text style={styles.title}>{isLogin ? 'تسجيل الدخول' : 'حساب جديد'}</Text>
-            {!isLogin && <TextInput style={styles.input} placeholder="الاسم" value={regName} onChangeText={setRegName} />}
-            <TextInput style={styles.input} placeholder="الهاتف" keyboardType="numeric" value={isLogin?loginPhone:regPhone} onChangeText={isLogin?setLoginPhone:setRegPhone} />
-            <TextInput style={styles.input} placeholder="الرمز السري" secureTextEntry value={isLogin?loginPassword:regPassword} onChangeText={isLogin?setLoginPassword:setRegPassword} />
-            <TouchableOpacity style={styles.mainBtn} onPress={() => isLogin ? handleAuth('login', {phone:loginPhone, password:loginPassword}, true) : handleAuth('register', {full_name:regName, phone:regPhone, password:regPassword}, false)}>
-                <Text style={styles.btnText}>{isLoadingAuth ? '...' : (isLogin ? 'دخول' : 'تسجيل')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setCurrentScreen(isLogin ? 'register' : 'login')} style={{marginTop:20}}>
-                <Text style={{color:'#2A9D8F'}}>{isLogin ? 'حساب جديد' : 'لديك حساب؟'}</Text>
-            </TouchableOpacity>
-          </View>
-        </SafeAreaView>
+        <SafeAreaProvider>
+            <SafeAreaView style={styles.container}>
+            <View style={styles.authBox}>
+                <Text style={styles.title}>{isLogin ? 'تسجيل الدخول' : 'حساب جديد'}</Text>
+                {!isLogin && <TextInput style={styles.input} placeholder="الاسم" value={regName} onChangeText={setRegName} />}
+                <TextInput style={styles.input} placeholder="الهاتف" keyboardType="numeric" value={isLogin?loginPhone:regPhone} onChangeText={isLogin?setLoginPhone:setRegPhone} />
+                <TextInput style={styles.input} placeholder="الرمز السري" secureTextEntry value={isLogin?loginPassword:regPassword} onChangeText={isLogin?setLoginPassword:setRegPassword} />
+                <TouchableOpacity style={styles.mainBtn} onPress={() => isLogin ? handleAuth('login', {phone:loginPhone, password:loginPassword}, true) : handleAuth('register', {full_name:regName, phone:regPhone, password:regPassword}, false)}>
+                    <Text style={styles.btnText}>{isLoadingAuth ? '...' : (isLogin ? 'دخول' : 'تسجيل')}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setCurrentScreen(isLogin ? 'register' : 'login')} style={{marginTop:20}}>
+                    <Text style={{color:'#2A9D8F'}}>{isLogin ? 'حساب جديد' : 'لديك حساب؟'}</Text>
+                </TouchableOpacity>
+            </View>
+            </SafeAreaView>
+        </SafeAreaProvider>
       );
   }
   return null;
