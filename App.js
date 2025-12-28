@@ -272,7 +272,7 @@ export default function App() {
                                 data={categories}
                                 keyExtractor={item => item.id.toString()}
                                 numColumns={2}
-                                contentContainerStyle={{padding:10, paddingBottom:120}}
+                                contentContainerStyle={{padding:10, paddingBottom:150}}
                                 refreshControl={
                                     <RefreshControl refreshing={isFetchingProducts} onRefresh={fetchCategoriesFromServer} />
                                 }
@@ -503,7 +503,13 @@ const styles = StyleSheet.create({
   checkoutBtn: { backgroundColor: '#E76F51', paddingVertical: 8, paddingHorizontal: 20, borderRadius: 20 },
   
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: 'white', padding: 25, borderTopLeftRadius: 25, borderTopRightRadius: 25 },
+  modalContent: { 
+    backgroundColor: 'white', 
+    padding: 22, 
+    paddingBottom: 50, // رفع المحتوى للأعلى لتفادي أزرار الهاتف
+    borderTopLeftRadius: 25, 
+    borderTopRightRadius: 25 
+  },
   qtyRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
   chip: { padding: 8, borderRadius: 20, borderWidth: 1, borderColor: '#ddd', flex:1, marginHorizontal:4, alignItems:'center' },
   chipActive: { backgroundColor: '#E0F2F1', borderColor: '#2A9D8F', borderWidth:2 },
