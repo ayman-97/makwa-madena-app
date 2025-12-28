@@ -201,7 +201,7 @@ export default function App() {
   const printInvoice = (order) => {
     if (Platform.OS !== 'web') return;
 
-    const LOGO_PATH = ""https://raw.githubusercontent.com/ayman-97/makwa-madena-app/master/assets/images/logo.png";"; 
+    const LOGO_PATH = "https://raw.githubusercontent.com/ayman-97/makwa-madena-app/master/assets/images/logo.png";
 
     const rawItems = order.summary.split('\n').filter(line => line.trim() !== "");
     const tableRows = rawItems.map(line => {
